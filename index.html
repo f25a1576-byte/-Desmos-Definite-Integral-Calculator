@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Integration Calculator</title>
+    <!-- Load Chart.js for graphing and Math.js for parsing formulas -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f5f5f7;
+            color: #1d1d1f;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            width: 100%;
+            max-width: 700px;
+        }
+        h2 { margin-top: 0; font-weight: 600; text-align: center; }
+        .graph-wrapper { position: relative; margin-bottom: 20px; height: 350px; }
+        .control-group { margin-bottom: 16px; }
+        label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 14px; }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-sizing: border-box;
+        }
+        .slider-container { display: flex; align-items: center; gap: 12px; }
+        input[type="range"] { flex: 1; }
+        .val-display { font-weight: bold; width: 40px; text-align: right; }
+        .result-box {
+            background-color: #e3f2fd;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 18px;
+            text-align: center;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        .error { color: #dc3545; font-size: 14px; margin-top: 4px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Integration Calculator & Grapher</h2>
+    
+    <div class="graph-wrapper">
+        <canvas id="calcChart"></canvas>
+    </div>
+
+    <div class="control-group">
+        <label for="formula">Function: f(x) =</label>
+        <input type="text" id="formula" value="x^2 - 1">
+        <div id="error-msg" class="error">Invalid mathematical expression.</div>
+    </div>
+
+    <div class="control-group">
+        <label>Lower Bound (a):</label>
+        <div class="slider-container">
+            <input type="range" id="param-a" min="-5" max="5" step="0.1" value="0">
+            <span id="val-a" class="val-display">0</span>
+        </div>
+    </div>
+
+    <div class="control-group">
+        <label>Upper Bound (b):</label>
+        <div class="slider-container">
+            <input type="range" id="param-b" min="-5" max="5" step="0.1" value="2">
+            <span id="val-b" class="val-display">2</span>
+        </div>
+    </div>
+
+    <div class="result-box" id="result">
+        ∫ f(x) dx = 0.6667
+    </div>
+</div>
+
+<script>
+    const ctx = document.getElementById('calcChart').getContext('2d');
+    let chart;
+
+    // Custom Chart.js plugin to shade area under curve between an interval [a, b]
+    const integralShadingPlugin = {
+        id: 'integralShading',
+        beforeDatasetsDraw(chart, args, pluginOptions) {
+            const { ctx, chartArea: { top, bottom, left, right }, scales: { x, y } } = chart;
+            const a = parseFloat(document.getElementById('param-a').value);
+            const b = parseFloat(document.getElementById('param-b').value);
+            const formulaStr = document.getElementById('formula').value;
+
+            let expr;
+            try {
+                expr = math.compile(formulaStr);
+            } catch (e) { return; }
+
+            ctx.save();
+            ctx.fillStyle = 'rgba(54, 162, 235, 0.3)'; // Shading color
+            ctx.beginPath();
+
+            let first = true;
+            // Scan across pixel space inside the boundaries
+            for (let pixelX = left; pixelX <= right; pixelX++) {
+                const dataX = x.getValueForPixel(pixelX);
+                
+                // Only shade inside interval [min(a,b), max(a,b)]
+                if (dataX >= Math.min(a, b) && dataX <= Math.max(a, b)) {
+                    try {
+                        const dataY = expr.evaluate({ x: dataX });
+                        const pixelY = y.getPixelForValue(dataY);
+                        const zeroY = y.getPixelForValue(0);
+
+                        if (first) {
+                            ctx.moveTo(pixelX, zeroY);
+                            first = false;
+                        }
+                        ctx.lineTo(pixelX, pixelY);
+                    } catch (e) {}
+                }
+            }
+
+            if (!first) {
+                const endPixelX = x.getPixelForValue(Math.max(a, b));
+                ctx.lineTo(Math.min(endPixelX, right), y.getPixelForValue(0));
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+    };
+
+    Chart.register(integralShadingPlugin);
+
+    // Trapezoidal rule integration
+    function calculateIntegral(expr, a, b, steps = 1000) {
+        if (a === b) return 0;
+        const h = (b - a) / steps;
+        let sum = 0.5 * (expr.evaluate({x: a}) + expr.evaluate({x: b}));
+        
+        for (let i = 1; i < steps; i++) {
+            sum += expr.evaluate({x: a + i * h});
+        }
+        return sum * h;
+    }
+
+    function updateCalculations() {
+        const formulaStr = document.getElementById('formula').value;
+        const a = parseFloat(document.getElementById('param-a').value);
+        const b = parseFloat(document.getElementById('param-b').value);
+        const errorEl = document.getElementById('error-msg');
+
+        document.getElementById('val-a').innerText = a;
+        document.getElementById('val-b').innerText = b;
+
+        try {
+            const expr = math.compile(formulaStr);
+            // Test execution to catch math formatting errors
+            expr.evaluate({x: 1}); 
+            errorEl.style.display = 'none';
+
+            // Calculate area value
+            const resultValue = calculateIntegral(expr, a, b);
+            document.getElementById('result').innerText = `∫ from ${a} to ${b} = ${resultValue.toFixed(4)}`;
+
+            // Regenerate dataset data points for graph (-5 to 5)
+            const points = [];
+            for (let xVal = -5; xVal <= 5; xVal += 0.1) {
+                points.push({ x: xVal, y: expr.evaluate({ x: xVal }) });
+            }
+
+            chart.data.datasets[0].data = points;
+            chart.update();
+
+        } catch (e) {
+            errorEl.style.display = 'block';
+        }
+    }
+
+    // Initialize Chart
+    chart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'f(x)',
+                data: [],
+                showLine: true,
+                borderColor: '#1d1d1f',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { type: 'linear', position: 'center', min: -5, max: 5 },
+                y: { type: 'linear', position: 'center', min: -5, max: 5 }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // Listeners
+    document.getElementById('formula').addEventListener('input', updateCalculations);
+    document.getElementById('param-a').addEventListener('input', updateCalculations);
+    document.getElementById('param-b').addEventListener('input', updateCalculations);
+
+    // Run on startup
+    updateCalculations();
+</script>
+
+</body>
+</html>
